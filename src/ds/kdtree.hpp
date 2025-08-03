@@ -5,18 +5,14 @@
 #include <memory>
 #include <optional>
 #include <utility>
-#include <iostream>
 #include <Eigen/Core>
-
-using State = Eigen::Vector2f;
-typedef bool (*StatePredicate)(const State&);
-
-static const State START(0.0, 0.0);
-static const State GOAL(20.0, 10.0);
 
 template<const size_t Dims, const size_t LeafSize>
 class KDTree {
 private:
+    static_assert(Dims > 0, "0-dimensional points are not allowed");
+    static_assert(LeafSize > 0, "Leaves must carry at least one point");
+
     using Point = Eigen::Vector<float, Dims>;
     using LeafPoints = Eigen::Matrix<float, Dims, LeafSize>;
 
@@ -100,11 +96,9 @@ public:
             return;
         }
 
-        // continue splitting while we can't add we're pretty likely to chop at
-        // least one point off the first split if the node is full, but not guaranteed if half
-        // of the cell is covered by an obstacle, for example
+        // continue splitting while we can't add
         while (!node->try_add_point(point)) {
-            const auto& [split_idx, split_val] = find_split(*node);
+            const auto& [split_idx, split_val] = find_split(*node, point);
 
             node->lower = std::make_unique<Node>(Node::new_leaf());
             node->upper = std::make_unique<Node>(Node::new_leaf());
@@ -206,14 +200,16 @@ private:
         return {{result_idx, result_sq_dist}};
     }
 
-    std::pair<Eigen::Index, float> find_split(const Node& node) {
+    std::pair<Eigen::Index, float> find_split(const Node& node, const Point& to_add) {
         assert(node.is_leaf());
 
         auto pts_view = node.leaf_data->points.leftCols(node.leaf_data->count);
+        size_t total_points = node.leaf_data->count + 1;
 
-        Point mean = pts_view.rowwise().mean();
-        Point variance = (pts_view.colwise() - mean).array().square().rowwise().sum()
-                         / (pts_view.cols() - 1);
+        Point mean = (pts_view.rowwise().sum() + to_add) / total_points;
+        Point variance = ((pts_view.colwise() - mean).array().square().rowwise().sum()
+                             + to_add.array().square())
+                         / total_points;
 
         Eigen::Index split_idx;
         variance.maxCoeff(&split_idx);
@@ -226,13 +222,3 @@ private:
 
     float squared_tol_;
 };
-
-int main() {
-    KDTree<2, 1> kd_tree;
-    kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    kd_tree.add_point(Eigen::Vector2f(3.0, 2.0));
-    std::cout << kd_tree.nearest_neighbor(Eigen::Vector2f(2.7, 2.0)) << "\n";
-
-    return 0;
-}
