@@ -1,224 +1,213 @@
-#include <SDL3/SDL.h>
+#include <array>
 #include <cassert>
 #include <cstddef>
-#include <limits>
-#include <memory>
 #include <optional>
 #include <utility>
 #include <Eigen/Core>
+#include <variant>
+#include <vector>
 
 template<const size_t Dims, const size_t LeafSize>
 class KDTree {
-private:
+public:
     static_assert(Dims > 0, "0-dimensional points are not allowed");
     static_assert(LeafSize > 0, "Leaves must carry at least one point");
 
     using Point = Eigen::Vector<float, Dims>;
     using LeafPoints = Eigen::Matrix<float, Dims, LeafSize>;
+    using NodeId = size_t;
+    using PointId = size_t;
 
-    struct LeafData {
-        LeafPoints points;
-        size_t count;
+private:
+    struct SplitNode {
+        NodeId lower;
+        NodeId upper;
+
+        Eigen::Index split_idx;
+        float split_value;
     };
 
-    struct Node {
-        // invariant:
-        // !is_leaf() <=> lower != nullptr <=> upper != nullptr <=> leaf_data == nullptr
-        std::unique_ptr<Node> lower;
-        std::unique_ptr<Node> upper;
+    struct LeafNode {
+        LeafPoints points;
+        std::array<PointId, LeafSize> point_ids;
+        size_t count;
 
-        std::unique_ptr<LeafData> leaf_data;
-
-        size_t split_idx;
-        float split_value;
-
-        static Node new_leaf() {
-            return Node{
-                .lower = nullptr,
-                .upper = nullptr,
-                .leaf_data = std::make_unique<LeafData>(),
-                .split_idx = 0,
-                .split_value = 0.0,
-            };
-        }
-
-        bool is_leaf() const {
-            assert((lower.get() == nullptr) == (upper.get() == nullptr)
-                   && (upper.get() == nullptr) == (leaf_data != nullptr));
-
-            return leaf_data != nullptr;
-        }
-
-        bool try_add_point(const Point& point) {
-            assert(is_leaf());
-
+        bool try_add_point(const Point& point, PointId id) {
             if (full()) return false;
-
-            leaf_data->points.col(leaf_data->count) = point;
-            leaf_data->count++;
-
+            points.col(count) = point;
+            point_ids[count] = id;
+            count++;
             return true;
         }
 
         bool empty() const {
-            assert(is_leaf());
-            return leaf_data->count == 0;
+            return count == 0;
         }
 
         bool full() const {
-            assert(is_leaf());
-            return leaf_data->count == LeafSize;
+            return count == LeafSize;
+        }
+
+        std::optional<std::pair<Eigen::Index, float>> closest_point(const Point& query) const {
+            if (empty()) return {};
+
+            Eigen::Index result_idx;
+            float result_sq_dist = (points.leftCols(count).colwise() - query)
+                                       .colwise()
+                                       .squaredNorm()
+                                       .minCoeff(&result_idx);
+
+            return {{result_idx, result_sq_dist}};
+        }
+
+        std::pair<Eigen::Index, float> find_split(const Point& to_add) const {
+            auto pts_view = points.leftCols(count);
+            size_t total_points = count + 1;
+
+            Point mean = (pts_view.rowwise().sum() + to_add) / total_points;
+            Point variance = ((pts_view.colwise() - mean).array().square().rowwise().sum()
+                                 + to_add.array().square())
+                             / total_points;
+
+            Eigen::Index split_idx;
+            variance.maxCoeff(&split_idx);
+
+            return {split_idx, mean[split_idx]};
         }
     };
 
+    using Node = std::variant<SplitNode, LeafNode>;
+
 public:
     KDTree(float point_dist_tol = 1e-5)
-        : total_points_(0), squared_tol_(point_dist_tol * point_dist_tol) {}
+        : nodes_({LeafNode{}}), squared_tol_(point_dist_tol * point_dist_tol) {}
 
-    void add_point(const Point& point) {
-        Node* node = &root_;
-        while (!node->is_leaf()) {
-            Eigen::Index split_idx = node->split_idx;
-            float split_val = node->split_value;
+    PointId add_point(const Point& point) {
+        PointId new_id = point_id_to_tree_loc_.size();
+        NodeId node_id = 0;
 
-            if (point[split_idx] > split_val) {
-                // can't be null, because node isn't a leaf
-                node = node->upper.get();
+        while (std::holds_alternative<SplitNode>(nodes_[node_id])) {
+            // Traverse split node
+            const SplitNode& split = std::get<SplitNode>(nodes_[node_id]);
+            if (point(split.split_idx) > split.split_value) {
+                node_id = split.upper;
             } else {
-                node = node->lower.get();
+                node_id = split.lower;
             }
         }
 
-        // avoid duplicate or near-duplicate points
-        assert(node != nullptr);
-        auto closest_opt = closest_in_leaf(*node, point);
+        LeafNode& leaf = std::get<LeafNode>(nodes_[node_id]);
+        auto closest_opt = leaf.closest_point(point);
         if (closest_opt.has_value() && closest_opt.value().second < squared_tol_) {
-            return;
+            return leaf.point_ids[closest_opt.value().first];
         }
 
-        // continue splitting while we can't add
-        while (!node->try_add_point(point)) {
-            const auto& [split_idx, split_val] = find_split(*node, point);
-
-            node->lower = std::make_unique<Node>(Node::new_leaf());
-            node->upper = std::make_unique<Node>(Node::new_leaf());
-
-            for (auto point: node->leaf_data->points.colwise()) {
-                if (point(split_idx) > split_val) {
-                    assert(node->upper->try_add_point(point));
-                } else {
-                    assert(node->lower->try_add_point(point));
-                }
-            }
-
-            node->leaf_data = nullptr;
-            node->split_idx = split_idx;
-            node->split_value = split_val;
-
-            if (point[split_idx] > split_val) {
-                node = node->upper.get();
-            } else {
-                node = node->lower.get();
-            }
+        if (leaf.try_add_point(point, new_id)) {
+            // Update location mapping: node_id * LeafSize + index in leaf
+            point_id_to_tree_loc_.push_back(node_id * LeafSize + (leaf.count - 1));
+            return new_id;
         }
 
-        total_points_++;
+        // Leaf is full, need to split
+        const auto [split_idx, split_value] = leaf.find_split(point);
+        NodeId lower_id = add_leaf();
+        NodeId upper_id = add_leaf();
+
+        // other reference may now be invalidated
+        const LeafNode& old_leaf = std::get<LeafNode>(nodes_[node_id]);
+
+        // Distribute points from original leaf to new leaves
+        for (size_t i = 0; i < old_leaf.count; i++) {
+            const Point& p = old_leaf.points.col(i);
+            PointId pid = old_leaf.point_ids[i];
+            NodeId target_id = (p(split_idx) > split_value) ? upper_id : lower_id;
+            LeafNode& target_leaf = std::get<LeafNode>(nodes_[target_id]);
+
+            // Should always succeed since leaves are empty
+            assert(target_leaf.try_add_point(p, pid));
+
+            // Update location mapping
+            point_id_to_tree_loc_[pid] = target_id * LeafSize + (target_leaf.count - 1);
+        }
+
+        // Convert current node to split node
+        nodes_[node_id].template emplace<SplitNode>(lower_id, upper_id, split_idx, split_value);
+
+        // Now handle the new point that caused the split
+        NodeId new_target_id = (point(split_idx) > split_value) ? upper_id : lower_id;
+        LeafNode& new_target_leaf = std::get<LeafNode>(nodes_[new_target_id]);
+        assert(new_target_leaf.try_add_point(point, new_id));
+        point_id_to_tree_loc_.push_back(new_target_id * LeafSize + (new_target_leaf.count - 1));
+
+        return new_id;
     }
 
-    Point nearest_neighbor(const Point& query) const {
-        assert(size() != 0);
+    PointId closest_point(const Point& query) const {
+        return nn_helper(0, query).first;
+    }
 
-        auto result = nn_helper(&root_, query);
-        return result.first;
+    Point get_point(PointId id) const {
+        size_t tree_loc = point_id_to_tree_loc_[id];
+        LeafNode& leaf = std::get<LeafNode>(nodes_[tree_loc / LeafSize]);
+        return leaf.points.col(tree_loc % LeafSize);
     }
 
     size_t size() const {
-        return total_points_;
+        return point_id_to_tree_loc_.size();
     }
 
 private:
-    std::pair<Point, float> nn_helper(const Node* node, const Point& query) const {
-        assert(size() != 0);
-
-        if (node == nullptr) {
-            return {Point(), std::numeric_limits<float>::infinity()};
-        }
-
-        if (node->is_leaf()) {
-            auto closest_opt = closest_in_leaf(*node, query);
-            if (!closest_opt.has_value()) {
-                return {Point(), std::numeric_limits<float>::infinity()};
+    std::pair<PointId, float> nn_helper(NodeId node, const Point& query) const {
+        const Node& current_node = nodes_[node];
+        if (std::holds_alternative<LeafNode>(current_node)) {
+            const LeafNode& leaf = std::get<LeafNode>(current_node);
+            if (leaf.empty()) {
+                return {0, std::numeric_limits<float>::infinity()};
             }
-
-            const auto& [point_idx, sq_dist] = closest_opt.value();
-            return {node->leaf_data->points.col(point_idx), sq_dist};
+            auto opt = leaf.closest_point(query);
+            if (!opt) {
+                return {0, std::numeric_limits<float>::infinity()};
+            }
+            auto [idx, sq_dist] = *opt;
+            return {leaf.point_ids[idx], sq_dist};
         } else {
-            Node* more_promising;
-            Node* less_promising;
-
-            if (query(node->split_idx) > node->split_value) {
-                more_promising = node->upper.get();
-                less_promising = node->lower.get();
+            const SplitNode& split = std::get<SplitNode>(current_node);
+            float query_val = query[split.split_idx];
+            NodeId near_child, far_child;
+            if (query_val <= split.split_value) {
+                near_child = split.lower;
+                far_child = split.upper;
             } else {
-                more_promising = node->lower.get();
-                less_promising = node->upper.get();
+                near_child = split.upper;
+                far_child = split.lower;
             }
 
-            assert(more_promising != nullptr && less_promising != nullptr);
+            auto [best_id, best_dist_sq] = nn_helper(near_child, query);
 
-            const auto& [pt, sq_dist] = nn_helper(more_promising, query);
-
-            float border_dist = query[node->split_idx] - node->split_value;
-            float sq_border_dist = border_dist * border_dist;
-
-            if (sq_dist < sq_border_dist) {
-                return {pt, sq_dist};
-            } else {
-                const auto& [new_pt, new_sq_dist] = nn_helper(less_promising, query);
-
-                if (new_sq_dist < sq_dist) {
-                    return {new_pt, new_sq_dist};
-                } else {
-                    return {pt, sq_dist};
+            // Check if we need to search the far child
+            float dist_to_plane = query_val - split.split_value;
+            float dist_sq_to_plane = dist_to_plane * dist_to_plane;
+            if (dist_sq_to_plane < best_dist_sq) {
+                auto [candidate_id, candidate_dist_sq] = nn_helper(far_child, query);
+                if (candidate_dist_sq < best_dist_sq) {
+                    best_id = candidate_id;
+                    best_dist_sq = candidate_dist_sq;
                 }
             }
+
+            return {best_id, best_dist_sq};
         }
     }
 
-    std::optional<std::pair<Eigen::Index, float>> closest_in_leaf(const Node& node,
-        const Point& query) const {
-        assert(node.is_leaf());
-
-        if (node.empty()) return {};
-
-        auto pts_view = node.leaf_data->points.leftCols(node.leaf_data->count);
-
-        Eigen::Index result_idx;
-        float result_sq_dist =
-            (pts_view.colwise() - query).colwise().squaredNorm().minCoeff(&result_idx);
-
-        return {{result_idx, result_sq_dist}};
+    NodeId add_leaf() {
+        NodeId id = nodes_.size();
+        nodes_.emplace_back(std::in_place_type<LeafNode>);
+        LeafNode& leaf = std::get<LeafNode>(nodes_.back());
+        leaf.count = 0;
+        return id;
     }
 
-    std::pair<Eigen::Index, float> find_split(const Node& node, const Point& to_add) {
-        assert(node.is_leaf());
-
-        auto pts_view = node.leaf_data->points.leftCols(node.leaf_data->count);
-        size_t total_points = node.leaf_data->count + 1;
-
-        Point mean = (pts_view.rowwise().sum() + to_add) / total_points;
-        Point variance = ((pts_view.colwise() - mean).array().square().rowwise().sum()
-                             + to_add.array().square())
-                         / total_points;
-
-        Eigen::Index split_idx;
-        variance.maxCoeff(&split_idx);
-
-        return {split_idx, mean[split_idx]};
-    }
-
-    Node root_ = Node::new_leaf();
-    size_t total_points_;
-
+    std::vector<Node> nodes_;
+    std::vector<size_t> point_id_to_tree_loc_;
     float squared_tol_;
 };

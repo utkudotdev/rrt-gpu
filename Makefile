@@ -1,10 +1,10 @@
-.PHONY: main test clean a
+.PHONY: all main test clean
 
 CXX := c++
 NVCC := nvcc
 
 INCLUDE_FLAGS := -Isrc -Ideps/doctest/doctest $(shell pkgconf --cflags eigen3) $(shell pkgconf --cflags sdl3)
-CXXFLAGS := -Wall -Wextra -std=c++23 -g $(INCLUDE_FLAGS)
+CXXFLAGS := -Wall -Wextra -std=c++23 -g $(INCLUDE_FLAGS) -MMD -MP
 LINK_FLAGS := $(shell pkgconf --libs eigen3) $(shell pkgconf --libs sdl3)
 
 SRC_DIR := src
@@ -23,29 +23,31 @@ MAIN_OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(MAIN_SRCS))
 TEST_SRCS := $(shell find $(TEST_DIR) -type f -name '*.cpp')
 TEST_OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(TEST_SRCS))
 
-SRC_HEADERS := $(shell find $(SRC_DIR) -type f -name '*.hpp')
-
 MAIN_EXEC := $(BUILD_DIR)/main
 TEST_EXEC := $(BUILD_DIR)/test_runner
 
+-include $(patsubst %.o,%.d,$(MAIN_OBJS)) $(patsubst %.o,%.d,$(TEST_OBJS))
+
+all: main $(TEST_EXEC)
+
 main: $(MAIN_EXEC)
+
+test: $(TEST_EXEC)
+	./$(TEST_EXEC)
 
 $(ALL_BUILD_DIRS):
 	@mkdir -p $(ALL_BUILD_DIRS)
 
 # executable files
-$(MAIN_EXEC): $(MAIN_OBJS) $(SRC_HEADERS) | $(ALL_BUILD_DIRS)
+$(MAIN_EXEC): $(MAIN_OBJS) | $(ALL_BUILD_DIRS)
 	$(CXX) $(MAIN_OBJS) -o $@ $(LINK_FLAGS)
 
-$(TEST_EXEC): $(TEST_OBJS) $(SRC_HEADERS) | $(ALL_BUILD_DIRS)
+$(TEST_EXEC): $(TEST_OBJS) | $(ALL_BUILD_DIRS)
 	$(CXX) $(TEST_OBJS) -o $@ $(LINK_FLAGS)
 
 # object files
 $(BUILD_DIR)/%.o: %.cpp | $(ALL_BUILD_DIRS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-test: $(TEST_EXEC)
-	./$(TEST_EXEC)
 
 clean:
 	rm -rf $(BUILD_DIR)

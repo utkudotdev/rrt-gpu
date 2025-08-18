@@ -1,9 +1,10 @@
 #include <SDL3/SDL.h>
 #include <cassert>
-#include <iostream>
 #include <Eigen/Core>
+#include <iostream>
 
 #include "ds/kdtree.hpp"
+#include "algo/rrt.hpp"
 
 using State = Eigen::Vector2f;
 typedef bool (*StatePredicate)(const State&);
@@ -12,11 +13,8 @@ static const State START(0.0, 0.0);
 static const State GOAL(20.0, 10.0);
 
 int main() {
-    KDTree<2, 1> kd_tree;
-    kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    kd_tree.add_point(Eigen::Vector2f(3.0, 2.0));
-    std::cout << kd_tree.nearest_neighbor(Eigen::Vector2f(1.7, 2.0)) << "\n";
+    KDTree<2, 32> kd_tree;
+    std::cout << rrt<2>(kd_tree, [](State s) { return s(0) > 0.1; }) << "\n";
 
     return 0;
 }
