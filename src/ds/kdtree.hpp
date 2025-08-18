@@ -65,9 +65,9 @@ private:
             size_t total_points = count + 1;
 
             Point mean = (pts_view.rowwise().sum() + to_add) / total_points;
-            Point variance = ((pts_view.colwise() - mean).array().square().rowwise().sum()
-                                 + to_add.array().square())
-                             / total_points;
+            Point leaf_sq_sum = (pts_view.colwise() - mean).array().square().rowwise().sum();
+            Point to_add_sq = (to_add - mean).array().square();
+            Point variance = (leaf_sq_sum + to_add_sq) / total_points;
 
             Eigen::Index split_idx;
             variance.maxCoeff(&split_idx);
@@ -78,9 +78,10 @@ private:
 
     using Node = std::variant<SplitNode, LeafNode>;
 
+    constexpr static float LEAF_SQUARED_TOL = 1e-7;
+
 public:
-    KDTree(float point_dist_tol = 1e-5)
-        : nodes_({LeafNode{}}), squared_tol_(point_dist_tol * point_dist_tol) {}
+    KDTree(): nodes_({LeafNode{}}) {}
 
     PointId add_point(const Point& point) {
         PointId new_id = point_id_to_tree_loc_.size();
@@ -98,7 +99,7 @@ public:
 
         LeafNode& leaf = std::get<LeafNode>(nodes_[node_id]);
         auto closest_opt = leaf.closest_point(point);
-        if (closest_opt.has_value() && closest_opt.value().second < squared_tol_) {
+        if (closest_opt.has_value() && closest_opt.value().second < LEAF_SQUARED_TOL) {
             return leaf.point_ids[closest_opt.value().first];
         }
 
@@ -130,14 +131,14 @@ public:
             point_id_to_tree_loc_[pid] = target_id * LeafSize + (target_leaf.count - 1);
         }
 
-        // Convert current node to split node
-        nodes_[node_id].template emplace<SplitNode>(lower_id, upper_id, split_idx, split_value);
-
         // Now handle the new point that caused the split
         NodeId new_target_id = (point(split_idx) > split_value) ? upper_id : lower_id;
         LeafNode& new_target_leaf = std::get<LeafNode>(nodes_[new_target_id]);
         assert(new_target_leaf.try_add_point(point, new_id));
         point_id_to_tree_loc_.push_back(new_target_id * LeafSize + (new_target_leaf.count - 1));
+
+        // Convert current node to split node
+        nodes_[node_id].template emplace<SplitNode>(lower_id, upper_id, split_idx, split_value);
 
         return new_id;
     }
@@ -148,7 +149,7 @@ public:
 
     Point get_point(PointId id) const {
         size_t tree_loc = point_id_to_tree_loc_[id];
-        LeafNode& leaf = std::get<LeafNode>(nodes_[tree_loc / LeafSize]);
+        const LeafNode& leaf = std::get<LeafNode>(nodes_[tree_loc / LeafSize]);
         return leaf.points.col(tree_loc % LeafSize);
     }
 
@@ -209,5 +210,4 @@ private:
 
     std::vector<Node> nodes_;
     std::vector<size_t> point_id_to_tree_loc_;
-    float squared_tol_;
 };
