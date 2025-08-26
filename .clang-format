@@ -18,7 +18,7 @@ PenaltyBreakAssignment: 60
 PenaltyBreakOpenParenthesis: 50
 IndentCaseLabels: true
 AllowShortFunctionsOnASingleLine: Empty
-SortIncludes: false
+SortIncludes: true
 MacroBlockBegin: "^#if .*$"
 MacroBlockEnd: "^#endif$"
 AlignEscapedNewlines: Right

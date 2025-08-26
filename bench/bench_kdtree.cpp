@@ -1,33 +1,19 @@
 #include <benchmark/benchmark.h>
-#include "ds/kdtree.hpp"
 #include <Eigen/Core>
 #include <cstddef>
 #include <random>
 #include <vector>
 
-// Generate uniformly distributed random points
-template<const size_t Dims>
-std::vector<Eigen::Vector<float, Dims>> generate_points(size_t count) {
-    std::vector<Eigen::Vector<float, Dims>> points;
-    points.reserve(count);
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dist(0.0, 1.0);
+#include "ds/kdtree.hpp"
+#include "util/random.hpp"
 
-    for (size_t i = 0; i < count; ++i) {
-        Eigen::Vector<float, Dims> p;
-        for (size_t j = 0; j < Dims; ++j) {
-            p[j] = dist(gen);
-        }
-        points.push_back(p);
-    }
-    return points;
-}
+std::mt19937 gen(10);
+std::uniform_real_distribution<float> dist(-1.0, 1.0);
 
 // Insertion benchmark
 template<const size_t Dims, const size_t LeafSize>
 static void BM_Insertion(benchmark::State& state) {
-    auto points = generate_points<Dims>(state.range(0));
+    auto points = generate_points<Dims>(state.range(0), dist, gen);
     for (auto _: state) {
         KDTree<Dims, LeafSize> tree;
         for (const auto& p: points) {
@@ -40,107 +26,59 @@ static void BM_Insertion(benchmark::State& state) {
 // Lookup benchmark
 template<const size_t Dims, const size_t LeafSize>
 static void BM_Lookup(benchmark::State& state) {
-    auto points = generate_points<Dims>(state.range(0));
+    auto points = generate_points<Dims>(state.range(0), dist, gen);
     KDTree<Dims, LeafSize> tree;
     for (const auto& p: points) {
         tree.add_point(p);
     }
-    auto queries = generate_points<Dims>(state.range(1));
+    auto queries = generate_points<Dims>(state.range(1), dist, gen);
 
-    size_t i = 0;
     for (auto _: state) {
-        // Use different query each time
-        benchmark::DoNotOptimize(tree.closest_point(queries[i]));
-        i = (i + 1) % queries.size();
+        for (const auto& q: queries) {
+            benchmark::DoNotOptimize(tree.closest_point(q));
+        }
+        benchmark::ClobberMemory();
     }
     state.SetComplexityN(state.range(0));  // Complexity based on tree size
 }
 
-// Register benchmarks for various configurations
-// Dims: 2, 3, 4
-// LeafSize: 1, 4, 16, 64
-// PointCount: 1000, 10000, 100000
-// QueryCount: 1000 (fixed for lookup)
+constexpr static size_t POINT_COUNT_MIN = 1 << 8;
+constexpr static size_t POINT_COUNT_MAX = 1 << 18;
+constexpr static size_t QUERY_COUNT = 1 << 8;
+constexpr static int MULT = 4;
 
 // Insertion Benchmarks
-BENCHMARK_TEMPLATE(BM_Insertion, 2, 1)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 2, 4)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 2, 16)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 2, 64)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
+#define BENCH_INSERT(dims, leaves)                                                                 \
+    BENCHMARK_TEMPLATE(BM_Insertion, dims, leaves)                                                 \
+        ->RangeMultiplier(MULT)                                                                    \
+        ->Range(POINT_COUNT_MIN, POINT_COUNT_MAX)                                                  \
+        ->Complexity();
 
-BENCHMARK_TEMPLATE(BM_Insertion, 3, 1)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 3, 4)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 3, 16)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 3, 64)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
+BENCH_INSERT(2, 1)
+BENCH_INSERT(2, 4)
+BENCH_INSERT(2, 16)
+BENCH_INSERT(2, 64)
 
-BENCHMARK_TEMPLATE(BM_Insertion, 4, 1)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 4, 4)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 4, 16)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
-BENCHMARK_TEMPLATE(BM_Insertion, 4, 64)->RangeMultiplier(10)->Range(1000, 100000)->Complexity();
+BENCH_INSERT(5, 1)
+BENCH_INSERT(5, 4)
+BENCH_INSERT(5, 16)
+BENCH_INSERT(5, 64)
 
 // Lookup Benchmarks
-// Args: {PointCount, QueryCount}
-BENCHMARK_TEMPLATE(BM_Lookup, 2, 1)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 2, 4)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 2, 16)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 2, 64)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
+#define BENCH_LOOKUP(dims, leaves)                                                                 \
+    BENCHMARK_TEMPLATE(BM_Lookup, dims, leaves)                                                    \
+        ->RangeMultiplier(MULT)                                                                    \
+        ->Ranges({{POINT_COUNT_MIN, POINT_COUNT_MAX}, {QUERY_COUNT, QUERY_COUNT}})                 \
+        ->Complexity();
 
-BENCHMARK_TEMPLATE(BM_Lookup, 3, 1)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 3, 4)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 3, 16)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 3, 64)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
+BENCH_LOOKUP(2, 1)
+BENCH_LOOKUP(2, 4)
+BENCH_LOOKUP(2, 16)
+BENCH_LOOKUP(2, 64)
 
-BENCHMARK_TEMPLATE(BM_Lookup, 4, 1)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 4, 4)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 4, 16)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
-BENCHMARK_TEMPLATE(BM_Lookup, 4, 64)
-    ->Args({1000, 1000})
-    ->Args({10000, 1000})
-    ->Args({100000, 1000})
-    ->Complexity();
+BENCH_LOOKUP(5, 1)
+BENCH_LOOKUP(5, 4)
+BENCH_LOOKUP(5, 16)
+BENCH_LOOKUP(5, 64)
 
 BENCHMARK_MAIN();

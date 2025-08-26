@@ -1,24 +1,19 @@
+#include <Eigen/Core>
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <optional>
 #include <utility>
-#include <Eigen/Core>
 #include <variant>
 #include <vector>
 
 template<const size_t Dims, const size_t LeafSize>
 class KDTree {
-public:
-    static_assert(Dims > 0, "0-dimensional points are not allowed");
-    static_assert(LeafSize > 0, "Leaves must carry at least one point");
-
+private:
     using Point = Eigen::Vector<float, Dims>;
     using LeafPoints = Eigen::Matrix<float, Dims, LeafSize>;
     using NodeId = size_t;
-    using PointId = size_t;
 
-private:
     struct SplitNode {
         NodeId lower;
         NodeId upper;
@@ -29,10 +24,10 @@ private:
 
     struct LeafNode {
         LeafPoints points;
-        std::array<PointId, LeafSize> point_ids;
+        std::array<size_t, LeafSize> point_ids;
         size_t count;
 
-        bool try_add_point(const Point& point, PointId id) {
+        bool try_add_point(const Point& point, size_t id) {
             if (full()) return false;
             points.col(count) = point;
             point_ids[count] = id;
@@ -83,8 +78,8 @@ private:
 public:
     KDTree(): nodes_({LeafNode{}}) {}
 
-    PointId add_point(const Point& point) {
-        PointId new_id = point_id_to_tree_loc_.size();
+    size_t add_point(const Point& point) {
+        size_t new_id = point_id_to_tree_loc_.size();
         NodeId node_id = 0;
 
         while (std::holds_alternative<SplitNode>(nodes_[node_id])) {
@@ -120,7 +115,7 @@ public:
         // Distribute points from original leaf to new leaves
         for (size_t i = 0; i < old_leaf.count; i++) {
             const Point& p = old_leaf.points.col(i);
-            PointId pid = old_leaf.point_ids[i];
+            size_t pid = old_leaf.point_ids[i];
             NodeId target_id = (p(split_idx) > split_value) ? upper_id : lower_id;
             LeafNode& target_leaf = std::get<LeafNode>(nodes_[target_id]);
 
@@ -143,12 +138,12 @@ public:
         return new_id;
     }
 
-    PointId closest_point(const Point& query) const {
+    size_t closest_point(const Point& query) const {
         return nn_helper(0, query).first;
     }
 
-    Point get_point(PointId id) const {
-        size_t tree_loc = point_id_to_tree_loc_[id];
+    Point operator[](size_t i) const {
+        size_t tree_loc = point_id_to_tree_loc_[i];
         const LeafNode& leaf = std::get<LeafNode>(nodes_[tree_loc / LeafSize]);
         return leaf.points.col(tree_loc % LeafSize);
     }
@@ -157,8 +152,13 @@ public:
         return point_id_to_tree_loc_.size();
     }
 
+    void clear() {
+        nodes_.clear();
+        point_id_to_tree_loc_.clear();
+    }
+
 private:
-    std::pair<PointId, float> nn_helper(NodeId node, const Point& query) const {
+    std::pair<size_t, float> nn_helper(NodeId node, const Point& query) const {
         const Node& current_node = nodes_[node];
         if (std::holds_alternative<LeafNode>(current_node)) {
             const LeafNode& leaf = std::get<LeafNode>(current_node);

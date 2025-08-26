@@ -1,9 +1,11 @@
 #include <doctest.h>
+
 #include <cstddef>
 #include <random>
 #include <vector>
-#include <limits>
+
 #include "ds/kdtree.hpp"
+#include "util/random.hpp"
 
 TEST_CASE("far points get different ids") {
     KDTree<2, 1> kd_tree;
@@ -17,28 +19,13 @@ TEST_CASE("far points get different ids") {
     CHECK(id2 != id3);
 }
 
-template<const size_t Dims>
-std::vector<Eigen::Vector<float, Dims>> generate_points(size_t count, int seed) {
-    std::vector<Eigen::Vector<float, Dims>> points;
-    points.reserve(count);
-    std::mt19937 gen(seed);
-    std::uniform_real_distribution<float> dist(0.0, 1.0);
-
-    for (size_t i = 0; i < count; ++i) {
-        Eigen::Vector<float, Dims> p;
-        for (size_t j = 0; j < Dims; ++j) {
-            p[j] = dist(gen);
-        }
-        points.push_back(p);
-    }
-    return points;
-}
+std::mt19937 gen(10);
+std::uniform_real_distribution<float> dist(-1.0, 1.0);
 
 template<const size_t LeafSize>
-void test_random_inserts_and_queries(size_t count_points, size_t count_queries, int seed_points,
-    int seed_queries) {
-    auto points = generate_points<2>(count_points, seed_points);
-    auto queries = generate_points<2>(count_queries, seed_queries);
+void test_random_inserts_and_queries(size_t count_points, size_t count_queries) {
+    auto points = generate_points<2>(count_points, dist, gen);
+    auto queries = generate_points<2>(count_queries, dist, gen);
 
     KDTree<2, LeafSize> kd_tree;
     std::vector<size_t> ids;
@@ -53,7 +40,7 @@ void test_random_inserts_and_queries(size_t count_points, size_t count_queries, 
         size_t min_id = 0;
 
         for (size_t id = 0; id < kd_tree.size(); id++) {
-            const auto& p = kd_tree.get_point(id);
+            const auto& p = kd_tree[id];
             float d = (q - p).squaredNorm();
             if (d < min_dist) {
                 min_dist = d;
@@ -108,10 +95,10 @@ TEST_CASE("closest points can be looked up") {
     }
 
     SUBCASE("random inserts [LeafPoints=1]") {
-        test_random_inserts_and_queries<1>(1000, 100, 10, 20);
+        test_random_inserts_and_queries<1>(1000, 100);
     }
 
     SUBCASE("random inserts [LeafPoints=32]") {
-        test_random_inserts_and_queries<32>(1000, 100, 10, 20);
+        test_random_inserts_and_queries<32>(1000, 100);
     }
 }
