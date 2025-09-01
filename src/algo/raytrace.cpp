@@ -1,6 +1,8 @@
 #include "algo/raytrace.hpp"
 
 #include <cassert>
+#include <cmath>
+#include <cstdlib>
 
 #include "ds/occupancy_grid.hpp"
 
@@ -11,8 +13,6 @@ bool is_segment_occupied(const Eigen::Vector2f& a, const Eigen::Vector2f& b,
     // line can be reparameterized as f(t) = t * delta + a where t: [0, 1]
     float t = 0.0;
     Eigen::Vector2f delta = b - a;
-
-    size_t i = 0;
 
     while (true) {
         if (grid.cell(cell_x, cell_y)) {
@@ -29,7 +29,14 @@ bool is_segment_occupied(const Eigen::Vector2f& a, const Eigen::Vector2f& b,
                                     + grid.origin().y();
         float remaining_y_t = (next_y_intersection - current.y()) / delta.y();
 
-        assert(i >= 0);
+        // sometims if delta is 0 it can mess up the sign
+        if (std::isinf(remaining_x_t)) {
+            remaining_x_t = std::abs(remaining_x_t);
+        }
+        if (std::isinf(remaining_y_t)) {
+            remaining_y_t = std::abs(remaining_y_t);
+        }
+
         assert(t >= 0.0);
         assert(t <= 1.0);
         assert(remaining_x_t >= 0.0);
@@ -61,8 +68,6 @@ bool is_segment_occupied(const Eigen::Vector2f& a, const Eigen::Vector2f& b,
             t += remaining_x_t;
             cell_x += x_increment;
         }
-
-        i++;
     }
 
     return false;
