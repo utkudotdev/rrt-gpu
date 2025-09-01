@@ -8,14 +8,15 @@
 #include "util/random.hpp"
 
 template<typename T, const int Dims>
-concept PointPredicate = std::predicate<T, const Eigen::Vector<float, Dims>&>;
+concept EdgePredicate =
+    std::predicate<T, const Eigen::Vector<float, Dims>&, const Eigen::Vector<float, Dims>&>;
 
-template<const int Dims, SupportsNearestNeighbor<Dims> NNIndex, PointPredicate<Dims> Pred,
+template<const int Dims, SupportsNearestNeighbor<Dims> NNIndex, EdgePredicate<Dims> Pred,
     typename Gen>
 std::vector<size_t> rrt(const Eigen::Vector<float, Dims>& start,
     const Eigen::Vector<float, Dims>& goal, size_t num_points, float move_dist,
     const Eigen::Vector<float, Dims>& min_bound, const Eigen::Vector<float, Dims>& max_bound,
-    float sq_dist_tol, NNIndex& nn_index, const Pred& is_point_free, Gen generator) {
+    float sq_dist_tol, NNIndex& nn_index, const Pred& is_edge_free, Gen generator) {
     using Point = Eigen::Vector<float, Dims>;
 
     size_t start_id = nn_index.add_point(start);
@@ -34,7 +35,7 @@ std::vector<size_t> rrt(const Eigen::Vector<float, Dims>& start,
 
         Point direction = (conf - nearest).normalized();
         Point in_between = nearest + direction * move_dist;
-        if (!is_point_free(in_between)) {
+        if (!is_edge_free(nearest, in_between)) {
             continue;
         }
 

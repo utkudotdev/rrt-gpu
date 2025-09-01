@@ -16,7 +16,12 @@ doctest_inc = include_directories('deps/doctest/doctest')
 src_inc = include_directories('src')
 
 # Main executable
-main_sources = files('src/algo/dfs.cpp', 'src/main.cpp')
+main_sources = files(
+    'src/algo/dfs.cpp',
+    'src/algo/raytrace.cpp',
+    'src/ds/occupancy_grid.cpp',
+    'src/main.cpp',
+)
 main_deps = [eigen3_dep, sfml_graphics_dep, sfml_window_dep, sfml_system_dep]
 
 executable(
@@ -28,16 +33,25 @@ executable(
 )
 
 # Test executable
-test_sources = files('test/test.cpp', 'test/test_kdtree.cpp')
+test_sources = files(
+    'src/algo/raytrace.cpp',
+    'src/ds/occupancy_grid.cpp',
+    'test/test.cpp',
+    'test/test_grid.cpp',
+    'test/test_kdtree.cpp',
+    'test/test_raytrace.cpp',
+)
 test_deps = [eigen3_dep]
 
-executable(
+test_exec = executable(
     'test_exec',
     test_sources,
     dependencies: test_deps,
     include_directories: [src_inc, doctest_inc],
-    install: true,
+    install: false,
 )
+
+test('unit tests', test_exec)
 
 # Benchmark executable
 bench_sources = files('bench/bench_kdtree.cpp')

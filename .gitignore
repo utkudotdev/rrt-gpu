@@ -1,3 +1,4 @@
 bench_results.json
 .cache/
 .vscode/
+.zed/

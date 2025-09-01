@@ -5,28 +5,24 @@
 #include <SFML/Window.hpp>
 #include <SFML/Window/Event.hpp>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <random>
 #include <vector>
 
+#include "algo/raytrace.hpp"
 #include "algo/rrt.hpp"
 #include "ds/kdtree.hpp"
+#include "ds/occupancy_grid.hpp"
 
 using State = Eigen::Vector2f;
 typedef bool (*StatePredicate)(const State&);
 
 template<PointSet<2> T>
 void run_vis(const T& point_set, const std::vector<size_t>& path, size_t start_id, size_t end_id,
-    const State& min_bound, const State& max_bound) {
+    const OccupancyGridView& grid) {
     sf::RenderWindow window(sf::VideoMode(sf::Vector2u(800, 600)), "RRT Visualization");
     window.setFramerateLimit(60);
-
-    // Print screen corner coordinates
-    std::cout << "Screen corners correspond to world points:\n";
-    std::cout << "Top-left (0,0): (" << min_bound.x() << ", " << max_bound.y() << ")\n";
-    std::cout << "Bottom-right (800,600): (" << max_bound.x() << ", " << min_bound.y() << ")\n";
-    std::cout << "Path " << (path.empty() ? "not " : "") << "found\n";
 
     while (window.isOpen()) {
         while (const std::optional event = window.pollEvent()) {
@@ -39,8 +35,8 @@ void run_vis(const T& point_set, const std::vector<size_t>& path, size_t start_i
         }
 
         // Calculate scaling factors
-        float scale_x = window.getSize().x / (max_bound.x() - min_bound.x());
-        float scale_y = window.getSize().y / (max_bound.y() - min_bound.y());
+        float scale_x = window.getSize().x / grid.real_size().x();
+        float scale_y = window.getSize().y / grid.real_size().y();
 
         window.clear(sf::Color::White);
 
@@ -49,8 +45,8 @@ void run_vis(const T& point_set, const std::vector<size_t>& path, size_t start_i
             const State& p = point_set[i];
             sf::CircleShape circle(5.0);
 
-            float screen_x = (p.x() - min_bound.x()) * scale_x;
-            float screen_y = window.getSize().y - (p.y() - min_bound.y()) * scale_y;
+            float screen_x = (p.x() - grid.origin().x()) * scale_x;
+            float screen_y = window.getSize().y - (p.y() - grid.origin().y()) * scale_y;
 
             circle.setOrigin(circle.getGeometricCenter());
             circle.setPosition(sf::Vector2f(screen_x, screen_y));
@@ -72,11 +68,11 @@ void run_vis(const T& point_set, const std::vector<size_t>& path, size_t start_i
                 const State& p2 = point_set[path[i + 1]];
 
                 sf::Vertex line[] = {
-                    sf::Vertex({(p1.x() - min_bound.x()) * scale_x,
-                                   window.getSize().y - (p1.y() - min_bound.y()) * scale_y},
+                    sf::Vertex({(p1.x() - grid.origin().x()) * scale_x,
+                                   window.getSize().y - (p1.y() - grid.origin().y()) * scale_y},
                         sf::Color::Black),
-                    sf::Vertex({(p2.x() - min_bound.x()) * scale_x,
-                                   window.getSize().y - (p2.y() - min_bound.y()) * scale_y},
+                    sf::Vertex({(p2.x() - grid.origin().x()) * scale_x,
+                                   window.getSize().y - (p2.y() - grid.origin().y()) * scale_y},
                         sf::Color::Black)};
                 window.draw(line, 2, sf::PrimitiveType::Lines);
             }
@@ -89,10 +85,11 @@ void run_vis(const T& point_set, const std::vector<size_t>& path, size_t start_i
 static const State START(0.0, 0.0);
 static const State GOAL(0.2, 0.0);
 static const size_t NUM_POINTS = 10000;
-static const float MOVE_DIST = 0.01;
+static constexpr float MOVE_DIST = 0.01;
 static const State MIN_BOUND(-0.1, -0.1);
 static const State MAX_BOUND(0.3, 0.1);
-static const float SQ_GOAL_TOL = 0.0001;
+static constexpr float SQ_GOAL_TOL = 0.0001;
+static constexpr float GRID_RESOLUTION = 0.05;
 
 int main() {
     KDTree<2, 4> kd_tree;
@@ -100,11 +97,17 @@ int main() {
     std::random_device rd;
     std::mt19937 gen(rd());
 
+    State diff = MAX_BOUND - MIN_BOUND;
+    size_t x_cells = static_cast<size_t>(std::ceil(diff.x() / GRID_RESOLUTION));
+    size_t y_cells = static_cast<size_t>(std::ceil(diff.y() / GRID_RESOLUTION));
+    bool* storage = new bool[x_cells * y_cells]{};
+    OccupancyGridView grid_view(storage, x_cells, y_cells, MIN_BOUND, GRID_RESOLUTION);
+
     auto path_ids = rrt<2>(
         START, GOAL, NUM_POINTS, MOVE_DIST, MIN_BOUND, MAX_BOUND, SQ_GOAL_TOL, kd_tree,
-        []([[maybe_unused]] State s) { return true; }, gen);
+        [&](const State& a, const State& b) { return is_segment_occupied(a, b, grid_view); }, gen);
 
-    run_vis(kd_tree, path_ids, 0, kd_tree.size() - 1, MIN_BOUND, MAX_BOUND);
+    run_vis(kd_tree, path_ids, 0, kd_tree.size() - 1, grid_view);
 
     return 0;
 }
