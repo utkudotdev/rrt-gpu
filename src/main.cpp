@@ -26,7 +26,7 @@ static constexpr float MOVE_DIST = 0.01;
 static const State MIN_BOUND(-0.1, -0.1);
 static const State MAX_BOUND(0.1, 0.1);
 static constexpr float SQ_GOAL_TOL = 0.0001;
-static constexpr float GRID_RESOLUTION = 0.05;
+static constexpr float GRID_RESOLUTION = 0.01;
 static constexpr float CIRCLE_RADIUS = 5.0;
 
 template<PointSet<2> T>
@@ -148,7 +148,9 @@ int main() {
 
     bool* storage = new bool[x_cells * y_cells]{};
     OccupancyGridView grid_view(storage, x_cells, y_cells, MIN_BOUND, GRID_RESOLUTION);
-    grid_view.cell(0, 0) = true;
+    grid_view.cell(12, 9) = true;
+    grid_view.cell(12, 10) = true;
+    grid_view.cell(12, 11) = true;
 
     auto result = rrt<2>(
         START, GOAL, NUM_POINTS, MOVE_DIST, MIN_BOUND, MAX_BOUND, SQ_GOAL_TOL, kd_tree,
