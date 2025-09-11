@@ -27,18 +27,20 @@ RRTResult rrt(const Eigen::Vector<float, Dims>& start, const Eigen::Vector<float
     const Pred& is_edge_free, Gen generator) {
     using Point = Eigen::Vector<float, Dims>;
 
-    size_t start_id = nn_index.add_point(start);
+    assert(nn_index.size() == 0);
+    size_t start_idx = 0;
+    assert(nn_index.add_point(start));
 
     std::vector<std::vector<size_t>> tree(num_points + 1, std::vector<size_t>());
 
     bool found = false;
-    size_t end_id = 0;
+    size_t end_idx = 0;
 
     while (nn_index.size() < num_points) {
         Point conf = generate_point_with_bounds<Dims>(min_bound, max_bound, generator);
 
-        auto nearest_id = nn_index.closest_point(conf);
-        Point nearest = nn_index[nearest_id];
+        auto nearest_idx = nn_index.closest_point(conf);
+        Point nearest = nn_index[nearest_idx];
 
         Point direction = (conf - nearest).normalized();
         Point in_between = nearest + direction * move_dist;
@@ -51,30 +53,29 @@ RRTResult rrt(const Eigen::Vector<float, Dims>& start, const Eigen::Vector<float
             continue;
         }
 
-        auto new_id = nn_index.add_point(in_between);
-        if (new_id != nn_index.size() - 1) {
-            // not a new point / can't be added
-            // if we hook this up we might create a cycle
+        if (!nn_index.add_point(in_between)) {
+            // failed to add point
             continue;
         }
+        size_t new_idx = nn_index.size() - 1;
 
-        tree[nearest_id].push_back(new_id);
+        tree[nearest_idx].push_back(new_idx);
 
         if ((in_between - goal).squaredNorm() < sq_dist_tol) {
             found = true;
-            end_id = new_id;
+            end_idx = new_idx;
             break;
         }
     }
 
     if (!found) {
-        return RRTResult{.tree = tree, .start_idx = start_id, .path = {}};
+        return RRTResult{.tree = tree, .start_idx = start_idx, .path = {}};
     }
 
-    auto path = dfs(tree, start_id, end_id);
+    auto path = dfs(tree, start_idx, end_idx);
     assert(!path.empty());
 
-    return RRTResult{.tree = tree, .start_idx = start_id, .path = path};
+    return RRTResult{.tree = tree, .start_idx = start_idx, .path = path};
 }
 
 // seed: 1481585100 grid assert failed

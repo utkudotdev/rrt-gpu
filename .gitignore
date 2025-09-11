@@ -1,4 +1,4 @@
-bench_results.json
+bench_results/
 .cache/
 .vscode/
 .zed/

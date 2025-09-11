@@ -9,9 +9,10 @@
 #include <variant>
 #include <vector>
 
+#include "ds/supports_nn.hpp"
+
 template<const size_t Dims, const size_t LeafSize>
 class KDTree {
-private:
     using Point = Eigen::Vector<float, Dims>;
     using LeafPoints = Eigen::Matrix<float, Dims, LeafSize>;
     using NodeId = size_t;
@@ -80,7 +81,7 @@ private:
 public:
     KDTree(): nodes_({LeafNode{}}) {}
 
-    size_t add_point(const Point& point) {
+    bool add_point(const Point& point) {
         size_t new_id = point_id_to_tree_loc_.size();
         NodeId node_id = 0;
 
@@ -97,13 +98,13 @@ public:
         LeafNode& leaf = std::get<LeafNode>(nodes_[node_id]);
         auto closest_opt = leaf.closest_point(point);
         if (closest_opt.has_value() && closest_opt.value().second < LEAF_SQUARED_TOL) {
-            return leaf.point_ids[closest_opt.value().first];
+            return false;
         }
 
         if (leaf.try_add_point(point, new_id)) {
             // Update location mapping: node_id * LeafSize + index in leaf
             point_id_to_tree_loc_.push_back(node_id * LeafSize + (leaf.count - 1));
-            return new_id;
+            return true;
         }
 
         // Leaf is full, need to split
@@ -137,7 +138,7 @@ public:
         // Convert current node to split node
         nodes_[node_id].template emplace<SplitNode>(lower_id, upper_id, split_idx, split_value);
 
-        return new_id;
+        return true;
     }
 
     size_t closest_point(const Point& query) const {
@@ -212,4 +213,7 @@ private:
 
     std::vector<Node> nodes_;
     std::vector<size_t> point_id_to_tree_loc_;
+
+    static_assert(SupportsNearestNeighbor<KDTree<Dims, LeafSize>, Dims>,
+        "KDTree should support nearest neighbor operations.");
 };

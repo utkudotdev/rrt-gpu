@@ -10,13 +10,13 @@
 TEST_CASE("far points get different ids") {
     KDTree<2, 1> kd_tree;
 
-    // close points may get the same id or may not, don't really care
-    // but we do care that points far enough apart are distinct
+    // second point is not required to be added correctly
+    bool added1 = kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
     kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    auto id2 = kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
-    auto id3 = kd_tree.add_point(Eigen::Vector2f(3.0, 2.0));
+    bool added3 = kd_tree.add_point(Eigen::Vector2f(3.0, 2.0));
 
-    CHECK(id2 != id3);
+    CHECK(added1);
+    CHECK(added3);
 }
 
 std::mt19937 gen(10);
@@ -31,8 +31,8 @@ void test_random_inserts_and_queries(size_t count_points, size_t count_queries) 
     std::vector<size_t> ids;
 
     for (size_t i = 0; i < points.size(); i++) {
-        size_t id = kd_tree.add_point(points[i]);
-        ids.push_back(id);
+        assert(kd_tree.add_point(points[i]));
+        ids.push_back(kd_tree.size() - 1);
     }
 
     for (const auto& q: queries) {
@@ -60,13 +60,13 @@ TEST_CASE("closest points can be looked up") {
         kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
         kd_tree.add_point(Eigen::Vector2f(5.0, 1.0));
         kd_tree.add_point(Eigen::Vector2f(-3.0, 8.0));
-        auto id4 = kd_tree.add_point(Eigen::Vector2f(10.0, 0.2));
-        auto id5 = kd_tree.add_point(Eigen::Vector2f(-0.9, 4.0));
+        kd_tree.add_point(Eigen::Vector2f(10.0, 0.2));
+        kd_tree.add_point(Eigen::Vector2f(-0.9, 4.0));
 
         CHECK(kd_tree.size() == 5);
 
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(8.0, 0.1)) == id4);
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(-1.0, 3.5)) == id5);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(8.0, 0.1)) == 3);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(-1.0, 3.5)) == 4);
     }
 
     SUBCASE("small leaves") {
@@ -75,23 +75,23 @@ TEST_CASE("closest points can be looked up") {
         kd_tree.add_point(Eigen::Vector2f(1.0, 2.0));
         kd_tree.add_point(Eigen::Vector2f(5.0, 1.0));
         kd_tree.add_point(Eigen::Vector2f(-3.0, 8.0));
-        auto id4 = kd_tree.add_point(Eigen::Vector2f(10.0, 0.2));
-        auto id5 = kd_tree.add_point(Eigen::Vector2f(-0.9, 4.0));
+        kd_tree.add_point(Eigen::Vector2f(10.0, 0.2));
+        kd_tree.add_point(Eigen::Vector2f(-0.9, 4.0));
 
         CHECK(kd_tree.size() == 5);
 
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(8.0, 0.1)) == id4);
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(-1.0, 3.5)) == id5);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(8.0, 0.1)) == 3);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(-1.0, 3.5)) == 4);
     }
 
     SUBCASE("small leaf close points") {
         KDTree<2, 1> kd_tree;
 
-        auto id1 = kd_tree.add_point(Eigen::Vector2f(5.0, 1.0));
-        auto id2 = kd_tree.add_point(Eigen::Vector2f(5.0, 1.01));
+        kd_tree.add_point(Eigen::Vector2f(5.0, 1.0));
+        kd_tree.add_point(Eigen::Vector2f(5.0, 1.01));
 
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(5.0, 0.999)) == id1);
-        CHECK(kd_tree.closest_point(Eigen::Vector2f(5.0, 1.02)) == id2);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(5.0, 0.999)) == 0);
+        CHECK(kd_tree.closest_point(Eigen::Vector2f(5.0, 1.02)) == 1);
     }
 
     SUBCASE("random inserts [LeafPoints=1]") {
